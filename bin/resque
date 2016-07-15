@@ -106,6 +106,7 @@ if($count > 1) {
             $worker = new Resque_Worker($queues);
             $worker->setLogger($logger);
             $logger->log(Psr\Log\LogLevel::NOTICE, 'Starting worker {worker}', array('worker' => $worker));
+            $worker->enableRequeueHandler();
             $worker->work($interval, $BLOCKING);
             break;
         }
@@ -116,6 +117,7 @@ else {
     $queues = explode(',', $QUEUE);
     $worker = new Resque_Worker($queues);
     $worker->setLogger($logger);
+    $worker->enableRequeueHandler();
 
     $PIDFILE = getenv('PIDFILE');
     if ($PIDFILE) {

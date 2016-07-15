@@ -234,6 +234,36 @@ class Resque_Worker
 		$this->unregisterWorker();
 	}
 
+	public function enableRequeueHandler(){
+		Resque_Event::listen('onFailure', function(Exception $exception, Resque_Job $job){
+			  if(property_exists($job->payload["class"],"backoff_strategy")){
+					$args = $job->getArguments();
+			    if(!isset($args['retryAttempt'])) {
+			      $args['retryAttempt'] = 0;
+			    }
+
+			    $classname = $job->payload['class'];
+			    $backoff_strategy = $classname::$backoff_strategy;
+
+			    if(!isset($backoff_strategy[$args['retryAttempt']])) {
+			      return;
+			    }
+
+			    $delay = $backoff_strategy[$args['retryAttempt']];
+
+			    $args['retryAttempt']++;
+			    if($delay == 0){
+			      Resque::enqueue($job->queue, $job->payload['class'], $args);
+			    }else{
+			      Resque::enqueueAt(time() + $delay, $job->queue, $job->payload['class'], $args);
+			    }
+
+					$this->logger->log(Psr\Log\LogLevel::NOTICE, "Requeue ". $job->payload['class']." to ".date("Y-m-d H:i:s", time() + $delay));
+
+				}
+		}
+	}
+
 	/**
 	 * Handle delayed items for the next scheduled timestamp.
 	 *
