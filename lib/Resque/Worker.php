@@ -261,7 +261,7 @@ class Resque_Worker
 					$this->logger->log(Psr\Log\LogLevel::NOTICE, "Requeue ". $job->payload['class']." to ".date("Y-m-d H:i:s", time() + $delay));
 
 				}
-		}
+		});
 	}
 
 	/**
