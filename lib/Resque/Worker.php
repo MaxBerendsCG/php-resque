@@ -235,73 +235,70 @@ class Resque_Worker
         $this->unregisterWorker();
     }
 
-    public function enableRequeueHandler()
+    public function requeueFailedJob(Exception $exception, Resque_Job $job)
     {
-        Resque_Event::listen('onFailure', function (Exception $exception, Resque_Job $job) {
+      $args = $job->getArguments();
+      $classname = $job->payload['class'];
+      $requeue = false;
+      $delay = 0;
 
-                $args = $job->getArguments();
-                $classname = $job->payload['class'];
-                $requeue = false;
-                $delay = 0;
+      if (!isset($args['retryAttempt'])) {
+        $args['retryAttempt'] = 0;
+      }
 
-                if (!isset($args['retryAttempt'])) {
-                    $args['retryAttempt'] = 0;
-                }
+      if (property_exists($classname, 'backoff_strategy')) {
+        $backoff_strategy = $classname::$backoff_strategy;
 
-                if (property_exists($classname, 'backoff_strategy')) {
-                    $backoff_strategy = $classname::$backoff_strategy;
+        if (isset($backoff_strategy[$args['retryAttempt']])) {
+          $delay = $backoff_strategy[$args['retryAttempt']];
+          $requeue = true;
+        } else {
+          $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} failed, backoff not available for attempt {attempts}', [
+            'class' => $job->payload['class'],
+            'attempts' => $args['retryAttempt'],
+          ]);
+        }
+      } elseif (property_exists($classname, 'retry_timeout')) {
+        $delay = (int) $classname::$retry_timeout;
+        $requeue = true;
+      }
 
-                    if (isset($backoff_strategy[$args['retryAttempt']])) {
-                        $delay = $backoff_strategy[$args['retryAttempt']];
-                        $requeue = true;
-                    } else {
-                        $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} failed, backoff not available for attempt {attempts}', [
-                            'class' => $job->payload['class'],
-                            'attempts' => $args['retryAttempt'],
-                        ]);
-                    }
-                } elseif (property_exists($classname, 'retry_timeout')) {
-                    $delay = (int) $classname::$retry_timeout;
-                    $requeue = true;
-                }
+      //Validate allowd exceptions
+      if(property_exists($classname,"retry_exceptions")){
+        $exception_class = get_class($exception);
+        $allowed_exceptions = $classname::$retry_exceptions;
+        if(!in_array($exception_class, $allowed_exceptions) && !array_key_exists($exception_class, $allowed_exceptions)){
+          $requeue = false;
+        }
+      }
 
-                //Validate allowd exceptions
-                if(property_exists($classname,"retry_exceptions")){
-                  $exception_class = get_class($exception);
-                  $allowed_exceptions = $classname::$retry_exceptions;
-                  if(!in_array($exception_class, $allowed_exceptions) && !array_key_exists($exception_class, $allowed_exceptions)){
-                    $requeue = false;
-                  }
-                }
+      //Do the limit checking last
+      if (property_exists($classname, 'retry_limit')) {
+        $retry_limit = (int) $classname::$retry_limit;
+        if ($args['retryAttempt'] >= $retry_limit) {
+          $requeue = false;
 
-                //Do the limit checking last
-                if (property_exists($classname, 'retry_limit')) {
-                    $retry_limit = (int) $classname::$retry_limit;
-                    if ($args['retryAttempt'] >= $retry_limit) {
-                        $requeue = false;
+          $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} failed, too many attempts ({attempts})', [
+            'class' => $job->payload['class'],
+            'attempts' => $args['retryAttempt'],
+          ]);
+        }
+      }
 
-                        $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} failed, too many attempts ({attempts})', [
-                            'class' => $job->payload['class'],
-                            'attempts' => $args['retryAttempt'],
-                        ]);
-                    }
-                }
+      if ($requeue) {
+        ++$args['retryAttempt'];
+        if ($delay == 0) {
+          Resque::enqueue($job->queue, $job->payload['class'], $args);
+        } else {
+          Resque::enqueueAt(time() + $delay, $job->queue, $job->payload['class'], $args);
+        }
 
-                if ($requeue) {
-                    ++$args['retryAttempt'];
-                    if ($delay == 0) {
-                        Resque::enqueue($job->queue, $job->payload['class'], $args);
-                    } else {
-                        Resque::enqueueAt(time() + $delay, $job->queue, $job->payload['class'], $args);
-                    }
-
-                    $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} to {time} (attempt {attempts})', [
-                        'class' => $job->payload['class'],
-                        'time' => date('Y-m-d H:i:s', time() + $delay),
-                        'attempts' => $args['retryAttempt'],
-                    ]);
-                }
-        });
+        $this->logger->log(Psr\Log\LogLevel::NOTICE, 'Requeue {class} to {time} (attempt {attempts})', [
+          'class' => $job->payload['class'],
+          'time' => date('Y-m-d H:i:s', time() + $delay),
+          'attempts' => $args['retryAttempt'],
+        ]);
+      }
     }
 
     /**
@@ -358,6 +355,8 @@ class Resque_Worker
         } catch (Exception $e) {
             $this->logger->log(Psr\Log\LogLevel::CRITICAL, '{job} has failed {stack}', array('job' => $job, 'stack' => $e->getMessage()));
             $job->fail($e);
+
+            $this->requeueFailedJob($e,$job); //This will validate if it needs to be requeued
 
             return;
         }
