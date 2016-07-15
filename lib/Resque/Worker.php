@@ -155,6 +155,9 @@ class Resque_Worker
 				break;
 			}
 
+			//Add delayed items
+			$this->handleDelayedItems();
+
 			// Attempt to find and reserve a job
 			$job = false;
 			if(!$this->paused) {
@@ -229,6 +232,47 @@ class Resque_Worker
 		}
 
 		$this->unregisterWorker();
+	}
+
+	/**
+	 * Handle delayed items for the next scheduled timestamp.
+	 *
+	 * Searches for any items that are due to be scheduled in Resque
+	 * and adds them to the appropriate job queue in Resque.
+	 *
+	 * @param DateTime|int $timestamp Search for any items up to this timestamp to schedule.
+	 */
+	public function handleDelayedItems($timestamp = null)
+	{
+		while (($timestamp = Resque::nextDelayedTimestamp($timestamp)) !== false) {
+			$this->updateProcLine('Processing Delayed Items');
+			$this->enqueueDelayedItemsForTimestamp($timestamp);
+		}
+	}
+
+	/**
+	 * Schedule all of the delayed jobs for a given timestamp.
+	 *
+	 * Searches for all items for a given timestamp, pulls them off the list of
+	 * delayed jobs and pushes them across to Resque.
+	 *
+	 * @param DateTime|int $timestamp Search for any items up to this timestamp to schedule.
+	 */
+	public function enqueueDelayedItemsForTimestamp($timestamp)
+	{
+		$item = null;
+		while ($item = Resque::nextItemForTimestamp($timestamp)) {
+			$this->logger->log(Psr\Log\LogLevel::INFO, 'queueing ' . $item['class'] . ' in ' . $item['queue'] .' [delayed]' );
+
+			Resque_Event::trigger('beforeDelayedEnqueue', array(
+				'queue' => $item['queue'],
+				'class' => $item['class'],
+				'args'  => $item['args'],
+			));
+
+			$payload = array_merge(array($item['queue'], $item['class']), $item['args']);
+			call_user_func_array('Resque::enqueue', $payload);
+		}
 	}
 
 	/**
