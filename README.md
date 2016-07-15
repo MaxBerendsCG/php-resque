@@ -83,7 +83,14 @@ Resque::setBackend('localhost:6379');
 $args = array(
         'name' => 'Chris'
         );
+//Enqueue now
 Resque::enqueue('default', 'My_Job', $args);
+
+//Delay by 5 seconds
+Resque::enqueueIn(5, 'default', 'My_Job', $args);
+
+//Delay by a custom amount
+Resque::enqueueAt(strtotime("+1 hour"), 'default', 'My_Job', $args);
 ```
 
 ### Defining Jobs ###
@@ -109,9 +116,38 @@ Any exception thrown by a job will result in the job failing - be
 careful here and make sure you handle the exceptions that shouldn't
 result in a job failing.
 
+It is possible let jobs auto retry if it detects that it has failed.
+This can be done by setting some static variables in the Job class:
+
+```php
+class My_Job
+{
+    //Set the retry limit (optional, defaults to infinite)
+    public static $retry_limit = 2;
+
+    //Retry every X seconds (will be ignored if $backoff_strategy is set)
+    public static $retry_timeout = 60;
+
+    //Retry ever X seconds based on the amount of retries.
+    //If the amount of retries exceeds the array size it won't be retired further
+    public static $backoff_strategy = [0,10,60,300,900,3600,7200];
+
+    //Only retry when specific exception classes are thrown (optional, defaults to any exception)
+    public static $retry_exceptions = [\Exception::class];
+
+    public function perform()
+    {
+        // Work work work
+        echo $this->args['name'];
+    }
+}
+```
+
 Jobs can also have `setUp` and `tearDown` methods. If a `setUp` method
 is defined, it will be called before the `perform` method is run.
 The `tearDown` method, if defined, will be called after the job finishes.
+
+
 
 
 ```php
@@ -437,7 +473,7 @@ Called after a job has been queued using the `Resque::enqueue` method. Arguments
 
 ## Step-By-Step ##
 
-For a more in-depth look at what php-resque does under the hood (without 
+For a more in-depth look at what php-resque does under the hood (without
 needing to directly examine the code), have a look at `HOWITWORKS.md`.
 
 ## Contributors ##
