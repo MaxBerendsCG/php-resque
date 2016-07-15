@@ -265,6 +265,15 @@ class Resque_Worker
                     $requeue = true;
                 }
 
+                //Validate allowd exceptions
+                if(property_exists($classname,"retry_exceptions")){
+                  $exception_class = get_class($exception);
+                  $allowed_exceptions = $classname::$retry_exceptions;
+                  if(!in_array($exception_class, $allowed_exceptions) && !array_key_exists($exception_class, $allowed_exceptions)){
+                    $requeue = false;
+                  }
+                }
+
                 //Do the limit checking last
                 if (property_exists($classname, 'retry_limit')) {
                     $retry_limit = (int) $classname::$retry_limit;
