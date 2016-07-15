@@ -257,8 +257,12 @@ class Resque_Worker
 			    }else{
 			      Resque::enqueueAt(time() + $delay, $job->queue, $job->payload['class'], $args);
 			    }
-
-					$this->logger->log(Psr\Log\LogLevel::NOTICE, "Requeue ". $job->payload['class']." to ".date("Y-m-d H:i:s", time() + $delay));
+					//. $job->payload['class']." to ".date("Y-m-d H:i:s", time() + $delay)
+					$this->logger->log(Psr\Log\LogLevel::NOTICE, "Requeue {class} to {time} (attempt {attempts})", [
+						"class" => $job->payload['class'],
+						"time" => date("Y-m-d H:i:s", time() + $delay),
+						"attempts" => $args['retryAttempt']
+					]);
 
 				}
 		});
