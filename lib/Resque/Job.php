@@ -179,6 +179,11 @@ class Resque_Job
 		$this->instance->job = $this;
 		$this->instance->args = $this->getArguments();
 		$this->instance->queue = $this->queue;
+
+		if(method_exists($this->instance,"init")){
+			$this->instance->init();
+		}
+
 		return $this->instance;
 	}
 
